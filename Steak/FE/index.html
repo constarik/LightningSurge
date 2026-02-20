@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>⚡ Lightning Surge v1.24 ⚡</title></title>
+  <title>⚡ Lightning Surge v1.25 ⚡</title></title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     
@@ -931,15 +931,16 @@ let currency = urlParams.get('currency') || 'USD';
 const lang = urlParams.get('lang') || 'en';
 const isDemo = urlParams.get('demo') === 'true';
 
-// Replay mode parameters
-const isReplayMode = urlParams.has('replay') || urlParams.has('replay_seed') || urlParams.has('seed');
-const replaySeed = urlParams.get('replay_seed') || urlParams.get('seed');
-const replayBet = parseFloat(urlParams.get('bet') || urlParams.get('amount') || '1.00');
+// Replay mode parameters (Stake Engine format)
+const isReplayMode = urlParams.get('replay') === 'true';
+const replayEvent = urlParams.get('event');
+const replayAmount = parseFloat(urlParams.get('amount') || '1.00');
+const replayMode = urlParams.get('mode') || 'base';
 const replayCurrency = urlParams.get('currency') || 'USD';
 
 console.log('[Init] isReplayMode:', isReplayMode);
 if (isReplayMode) {
-  console.log('[Replay] seed:', replaySeed, 'bet:', replayBet, 'currency:', replayCurrency);
+  console.log('[Replay] event:', replayEvent, 'amount:', replayAmount, 'mode:', replayMode, 'currency:', replayCurrency);
 }
 
 // Build proper RGS base URL
@@ -1167,6 +1168,36 @@ async function rgsEndRound() {
     if (!error.message.includes('does not have active bet')) {
       showError(`EndRound failed: ${error.message}`);
     }
+    return null;
+  }
+}
+
+async function rgsReplay(eventId) {
+  const url = `${rgsBaseUrl}/wallet/replay`;
+  console.log('[RGS] Replay URL:', url);
+  console.log('[RGS] Replay event:', eventId);
+  
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: eventId })
+    });
+    
+    console.log('[RGS] Replay response status:', response.status);
+    
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`HTTP ${response.status}: ${text}`);
+    }
+    
+    const data = await response.json();
+    console.log('[RGS] Replay response data:', data);
+    
+    return data;
+  } catch (error) {
+    console.error('[RGS] Replay error:', error);
+    showError(`Replay failed: ${error.message}`);
     return null;
   }
 }
@@ -1971,7 +2002,7 @@ async function init() {
   }
   
   // Handle Replay Mode
-  if (isReplayMode && replaySeed) {
+  if (isReplayMode && replayEvent) {
     console.log('[Replay] Initializing replay mode...');
     
     // Show replay banner
@@ -1981,10 +2012,10 @@ async function init() {
     
     // Display play amount clearly (using compliant terminology)
     const currSymbol = getCurrencySymbol(replayCurrency);
-    replayBetInfo.innerHTML = 'Play: ' + currSymbol + replayBet.toFixed(2);
+    replayBetInfo.innerHTML = 'Play: ' + currSymbol + replayAmount.toFixed(2);
     
     // Set bet
-    currentBetAmount = replayBet * AMOUNT_MULTIPLIER;
+    currentBetAmount = replayAmount * AMOUNT_MULTIPLIER;
     updateBetDisplay();
     
     // Update mode indicator
@@ -2001,14 +2032,14 @@ async function init() {
     
     // Auto-start replay after short delay
     setTimeout(function() {
-      console.log('[Replay] Starting replay with seed:', replaySeed);
-      spinWithSeed(parseInt(replaySeed));
+      console.log('[Replay] Starting replay with event:', replayEvent);
+      replayWithEvent(replayEvent);
     }, 1000);
   }
 }
 
-// Replay-specific spin function
-async function spinWithSeed(seed) {
+// Replay-specific function using RGS event
+async function replayWithEvent(eventId) {
   if (isSpinning) return;
   isSpinning = true;
   
@@ -2016,7 +2047,36 @@ async function spinWithSeed(seed) {
   document.getElementById('winDisplay').textContent = '';
   document.getElementById('wildModeBanner').textContent = '';
   
-  const result = calculateRound(currentBetAmount, seed);
+  // Fetch replay data from RGS
+  const replayData = await rgsReplay(eventId);
+  
+  if (!replayData) {
+    showError('Failed to load replay data');
+    isSpinning = false;
+    return;
+  }
+  
+  // Extract game state from replay response
+  // The state contains: grid, strikes, chains, totalWin, wildMode
+  const state = replayData.state || replayData;
+  console.log('[Replay] State:', state);
+  
+  // Build result object from replay state
+  const result = {
+    grid: state.grid,
+    strikes: state.strikes || [],
+    misses: state.misses || [],
+    chains: state.chains || [],
+    totalWin: state.totalWin || 0,
+    wildMode: state.wildMode || false,
+    betAmount: currentBetAmount
+  };
+  
+  // Set grid from replay data
+  grid = result.grid;
+  renderGrid();
+  
+  // Animate the replay
   await animateRound(result);
   
   if (result.totalWin > 0) {
@@ -2041,7 +2101,7 @@ function showReplayAgainButton() {
   spinBtn.textContent = '🔄 REPLAY AGAIN';
   spinBtn.disabled = false;
   spinBtn.onclick = function() {
-    spinWithSeed(parseInt(replaySeed));
+    replayWithEvent(replayEvent);
   };
 }
 
