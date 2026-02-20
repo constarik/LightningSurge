@@ -1982,8 +1982,9 @@ async function init() {
     updateBetDisplay();
     
     // Update mode indicator
-    modeEl.textContent = '';
+    modeEl.textContent = '🔄 REPLAY MODE';
     modeEl.className = 'mode-indicator';
+    modeEl.style.color = '#ff6b00';
     
     // Hide balance in replay mode
     document.getElementById('balance').textContent = '---';
