@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>⚡ Lightning Surge v1.27 ⚡</title></title>
+  <title>⚡ Lightning Surge v1.28 ⚡</title></title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     
@@ -757,7 +757,7 @@
 </head>
 <body>
   <h1>⚡LIGHTNING SURGE⚡</h1>
-  <div style="position:fixed;bottom:10px;right:10px;font-size:16px;color:#ff0;background:#000;padding:5px 10px;border-radius:5px;z-index:9999;">v1.27</div>
+  <div style="position:fixed;bottom:10px;right:10px;font-size:16px;color:#ff0;background:#000;padding:5px 10px;border-radius:5px;z-index:9999;">v1.28</div>
   
   <div id="replayBanner" class="replay-banner" style="display: none;">
     🔄 REPLAY MODE
@@ -967,6 +967,7 @@ let spinNumber = 0;
 let wildModeCount = 0;
 let gameRng = null;  // Current round RNG (seeded)
 let lastBetID = null;  // For replay testing
+let lastSeed = null;   // For local replay
 
 // RGS Config (loaded from authenticate)
 let rgsConfig = {
@@ -1632,6 +1633,10 @@ async function spin() {
       console.log('[RGS] Saved betID for replay:', lastBetID);
     }
     
+    // Save seed for local replay
+    lastSeed = seed;
+    console.log('[RGS] Saved seed for local replay:', lastSeed);
+    
     if (seed === undefined || seed === null) {
       console.error('[RGS] No seed in response!');
       showError('Server did not return seed');
@@ -2112,14 +2117,35 @@ function showReplayAgainButton() {
   };
 }
 
-// Replay last spin (for testing)
-function replayLast() {
-  if (!lastBetID) {
+// Replay last spin (local replay using saved seed)
+async function replayLast() {
+  if (!lastSeed) {
     showError('No spin to replay yet');
     return;
   }
-  console.log('[Replay] Replaying last betID:', lastBetID);
-  replayWithEvent(lastBetID);
+  if (isSpinning) return;
+  
+  console.log('[Replay] Local replay with seed:', lastSeed);
+  isSpinning = true;
+  
+  document.getElementById('spinBtn').disabled = true;
+  document.getElementById('winDisplay').textContent = '';
+  document.getElementById('wildModeBanner').textContent = '';
+  
+  // Recalculate using saved seed
+  const result = calculateRound(currentBetAmount, lastSeed);
+  await animateRound(result);
+  
+  if (result.totalWin > 0) {
+    document.getElementById('winDisplay').textContent = `WIN: ${formatAmount(result.totalWin)}`;
+    document.getElementById('winDisplay').style.color = '#00ff88';
+  } else {
+    document.getElementById('winDisplay').textContent = 'NO WIN';
+    document.getElementById('winDisplay').style.color = '#ff6666';
+  }
+  
+  isSpinning = false;
+  document.getElementById('spinBtn').disabled = false;
 }
 
 init();
