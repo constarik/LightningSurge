@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>⚡ Lightning Surge v1.29 ⚡</title></title>
+  <title>⚡ Lightning Surge v1.30 ⚡</title></title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     
@@ -757,7 +757,7 @@
 </head>
 <body>
   <h1>⚡LIGHTNING SURGE⚡</h1>
-  <div style="position:fixed;bottom:10px;right:10px;font-size:16px;color:#ff0;background:#000;padding:5px 10px;border-radius:5px;z-index:9999;">v1.29</div>
+  <div style="position:fixed;bottom:10px;right:10px;font-size:16px;color:#ff0;background:#000;padding:5px 10px;border-radius:5px;z-index:9999;">v1.30</div>
   
   <div id="replayBanner" class="replay-banner" style="display: none;">
     🔄 REPLAY MODE
@@ -935,14 +935,17 @@ const isDemo = urlParams.get('demo') === 'true';
 
 // Replay mode parameters (Stake Engine format)
 const isReplayMode = urlParams.get('replay') === 'true';
+const replayGame = urlParams.get('game');
+const replayVersion = urlParams.get('version');
+const replayModeParam = urlParams.get('mode');
 const replayEvent = urlParams.get('event');
 const replayAmount = parseFloat(urlParams.get('amount') || '1.00');
-const replayMode = urlParams.get('mode') || 'base';
 const replayCurrency = urlParams.get('currency') || 'USD';
 
 console.log('[Init] isReplayMode:', isReplayMode);
 if (isReplayMode) {
-  console.log('[Replay] event:', replayEvent, 'amount:', replayAmount, 'mode:', replayMode, 'currency:', replayCurrency);
+  console.log('[Replay] game:', replayGame, 'version:', replayVersion, 'mode:', replayModeParam, 'event:', replayEvent);
+  console.log('[Replay] amount:', replayAmount, 'currency:', replayCurrency);
 }
 
 // Build proper RGS base URL
@@ -1176,16 +1179,14 @@ async function rgsEndRound() {
   }
 }
 
-async function rgsReplay(eventId) {
-  const url = `${rgsBaseUrl}/wallet/replay`;
+async function rgsReplay(game, version, mode, event) {
+  const url = `${rgsBaseUrl}/bet/replay/${game}/${version}/${mode}/${event}`;
   console.log('[RGS] Replay URL:', url);
-  console.log('[RGS] Replay event:', eventId);
   
   try {
     const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ event: eventId })
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' }
     });
     
     console.log('[RGS] Replay response status:', response.status);
@@ -2066,7 +2067,7 @@ async function init() {
   }
   
   // Handle Replay Mode
-  if (isReplayMode && replayEvent) {
+  if (isReplayMode && replayEvent && replayGame && replayVersion && replayModeParam) {
     console.log('[Replay] Initializing replay mode...');
     
     // Show replay banner
@@ -2090,56 +2091,85 @@ async function init() {
     // Hide balance in replay mode
     document.getElementById('balance').textContent = '---';
     
-    // Disable bet controls in replay mode
+    // Disable bet controls and auto in replay mode
     document.querySelectorAll('.bet-btn').forEach(btn => btn.disabled = true);
-    document.getElementById('autoBtn').disabled = true;
+    document.getElementById('autoBtn').style.display = 'none';
+    document.getElementById('replayBtn').style.display = 'none';
     
-    // Auto-start replay after short delay
-    setTimeout(function() {
-      console.log('[Replay] Starting replay with event:', replayEvent);
-      replayWithEvent(replayEvent);
-    }, 1000);
+    // Show PLAY button to start replay (per UX guidelines)
+    const spinBtn = document.getElementById('spinBtn');
+    spinBtn.textContent = '▶️ PLAY REPLAY';
+    spinBtn.disabled = false;
+    spinBtn.onclick = function() {
+      startReplay();
+    };
   }
 }
 
-// Replay-specific function using RGS event
-async function replayWithEvent(eventId) {
+// Start replay - fetch data and play
+async function startReplay() {
   if (isSpinning) return;
   isSpinning = true;
   
-  document.getElementById('spinBtn').disabled = true;
+  const spinBtn = document.getElementById('spinBtn');
+  spinBtn.disabled = true;
+  spinBtn.textContent = 'Loading...';
+  
   document.getElementById('winDisplay').textContent = '';
   document.getElementById('wildModeBanner').textContent = '';
   
-  // Fetch replay data from RGS
-  const replayData = await rgsReplay(eventId);
+  // Fetch replay data from RGS: GET /bet/replay/{game}/{version}/{mode}/{event}
+  const replayData = await rgsReplay(replayGame, replayVersion, replayModeParam, replayEvent);
   
   if (!replayData) {
     showError('Failed to load replay data');
     isSpinning = false;
+    spinBtn.textContent = '▶️ PLAY REPLAY';
+    spinBtn.disabled = false;
     return;
   }
   
-  // Extract seed from replay response
-  // Response may be {state: [...]} or {round: {state: [...]}}
-  const state = replayData.round?.state || replayData.state || [];
-  const seedObj = state[0] || {};
-  const seed = seedObj.seed;
+  console.log('[Replay] Data:', replayData);
+  
+  // Extract state - contains our saved game state
+  const state = replayData.state || {};
+  const seed = state.seed;
+  const payoutMultiplier = replayData.payoutMultiplier || 0;
   
   console.log('[Replay] State:', state);
   console.log('[Replay] Seed:', seed);
+  console.log('[Replay] PayoutMultiplier:', payoutMultiplier);
   
-  if (!seed) {
-    showError('No seed in replay data');
+  let result;
+  
+  if (seed) {
+    // Recalculate from seed (deterministic)
+    result = calculateRound(currentBetAmount, seed);
+  } else if (state.grid && state.chains) {
+    // Use saved state directly
+    grid = state.grid;
+    renderGrid();
+    result = {
+      grid: state.grid,
+      strikes: state.strikes || [],
+      misses: state.misses || [],
+      chains: state.chains || [],
+      totalWin: state.totalWin || (payoutMultiplier * currentBetAmount),
+      wildMode: state.wildMode || false,
+      betAmount: currentBetAmount
+    };
+  } else {
+    showError('Invalid replay data');
     isSpinning = false;
+    spinBtn.textContent = '▶️ PLAY REPLAY';
+    spinBtn.disabled = false;
     return;
   }
   
-  // Use seed to recalculate the round deterministically
-  const result = calculateRound(currentBetAmount, seed);
-  
+  // Play animation
   await animateRound(result);
   
+  // Show win
   if (result.totalWin > 0) {
     document.getElementById('winDisplay').textContent = `WIN: ${formatAmount(result.totalWin)}`;
     document.getElementById('winDisplay').style.color = '#00ff88';
@@ -2150,19 +2180,11 @@ async function replayWithEvent(eventId) {
   
   isSpinning = false;
   
-  // Show replay again button
-  showReplayAgainButton();
-}
-
-function showReplayAgainButton() {
-  if (!isReplayMode) return;
-  
-  // Enable spin button as "Replay Again"
-  const spinBtn = document.getElementById('spinBtn');
-  spinBtn.textContent = '🔄 REPLAY AGAIN';
+  // Show "Play Again" button
+  spinBtn.textContent = '🔄 PLAY AGAIN';
   spinBtn.disabled = false;
   spinBtn.onclick = function() {
-    replayWithEvent(replayEvent);
+    startReplay();
   };
 }
 
